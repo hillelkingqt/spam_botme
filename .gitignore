@@ -1,0 +1,36 @@
+﻿# Go
+bin/
+*.exe
+*.out
+*.test
+
+# Go modules
+vendor/
+go.sum
+go.work
+go.work.sum
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+dist/
+.env
+.env.*
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# VSCode
+.vscode/
+.history/
+
+# OS / Temp
+.DS_Store
+Thumbs.db
+*.log
+
+wwebjs_auth_custom/
