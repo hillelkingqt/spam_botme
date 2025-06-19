@@ -292,7 +292,8 @@ async function initializeClient() {
         // Clear session if exists
         const sessionPath = path.join(__dirname, 'wwebjs_auth_custom', 'session-bot_972535349587');
         if (fs.existsSync(sessionPath)) {
-            console.log('Found existing session, attempting to use it...');
+            console.log('Deleting existing session directory...');
+            fs.rmSync(sessionPath, { recursive: true, force: true });
         }
 
         await client.initialize();
