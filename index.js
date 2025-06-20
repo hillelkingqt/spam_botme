@@ -1465,6 +1465,7 @@ client.on('message', async message => {
                     originalId: pendingData.originalId,
                     realJid: senderId,
                     messageToDelete: pendingData.messageToDelete,
+                    questionAttempts: 0, // Initialize questionAttempts
                     timeoutId: setTimeout(async () => {
                         if (!activeTests.has(senderId)) return;
                         await handleTestTimeout(client, senderId, pendingData.groupId, pendingData.messageToDelete);
@@ -1499,6 +1500,7 @@ async function handleTestAnswer(client, message, senderId) {
 
     if (userAnswer === correctAnswer) {
         testData.correctAnswers++;
+        testData.questionAttempts = 0; // Reset attempts on correct answer
         if (testData.correctAnswers >= 3) {
             clearTimeout(testData.timeoutId);
             // 1) add private JID
@@ -1522,105 +1524,113 @@ async function handleTestAnswer(client, message, senderId) {
             activeTests.set(senderId, testData);
         }
     } else {
-        testData.wrongAnswers++;
-        if (testData.wrongAnswers >= 2) {
-            clearTimeout(testData.timeoutId);
-            try {
-                // נסה לקבל JID ממקורות שונים
-                const phoneJid =
-                    senderId                     // בדרך כלל 972…@c.us
-                    || testData.originalId          // 1258…@lid
-                    || message.from                 // fallback – group JID או private
-                    || message.author;              // fallback נוסף
+        testData.questionAttempts = (testData.questionAttempts || 0) + 1;
 
-                const phoneDisplay3 = extractPhone(phoneJid);
+        if (testData.questionAttempts === 1) {
+            // First incorrect attempt
+            await client.sendMessage(senderId, "לא נכון. ניסיון אחרון:");
+            activeTests.set(senderId, testData); // Save updated attempts
+            return; // Wait for the second attempt
+        } else if (testData.questionAttempts === 2) {
+            // Second incorrect attempt
+            testData.wrongAnswers++;
+            testData.questionAttempts = 0; // Reset for the next question
 
-                // Get the specific group chat
-                const chat = await client.getChatById(testData.groupId);
-
-                // FIXED: Use the originalId (LID format) instead of senderId (real JID)
-                const userToRemove = testData.originalId || senderId;
-                console.log(`Attempting to remove user: ${userToRemove} from group: ${testData.groupId}`);
-
-                // Try to remove the user from just this group
+            if (testData.wrongAnswers >= 2) {
+                clearTimeout(testData.timeoutId);
                 try {
-                    await chat.removeParticipants([userToRemove]);
-                    console.log(`✅ Successfully removed ${userToRemove} from ${chat.name || testData.groupId}`);
+                    // נסה לקבל JID ממקורות שונים
+                    const phoneJid =
+                        senderId                     // בדרך כלל 972…@c.us
+                        || testData.originalId          // 1258…@lid
+                        || message.from                 // fallback – group JID או private
+                        || message.author;              // fallback נוסף
 
-                    // Send message to user
-                    await client.sendMessage(
-                        senderId,
-                        '❌ נכשלת במבחן. הוסרת מהקבוצה.'
-                    );
+                    const phoneDisplay3 = extractPhone(phoneJid);
 
-                    // Send admin alert - use the phone number for display
-                    const phoneDisplay = userToRemove.split('@')[0];
-                    await sendAdminAlert(
-                        client,
-                        `משתמש ${phoneDisplay} נכשל במבחן והוסר מהקבוצה ${chat.name || testData.groupId}
-                        Phone Display: ${phoneDisplay3}`
-                    );
+                    // Get the specific group chat
+                    const chat = await client.getChatById(testData.groupId);
 
-                    // Add to blacklist using the real JID for consistency
-                    addToBlacklist(senderId);
-                    const blacklistResults = await addUserToBlacklistWithLid(message, addToBlacklist);
-                } catch (removeError) {
-                    console.error(`❌ Error removing ${userToRemove} from group:`, removeError);
+                    // FIXED: Use the originalId (LID format) instead of senderId (real JID)
+                    const userToRemove = testData.originalId || senderId;
+                    console.log(`Attempting to remove user: ${userToRemove} from group: ${testData.groupId}`);
 
-                    // Send message to user
-                    await client.sendMessage(
-                        senderId,
-                        '❌ נכשלת במבחן. לא ניתן היה להסיר אותך מהקבוצה.'
-                    );
+                    // Try to remove the user from just this group
+                    try {
+                        await chat.removeParticipants([userToRemove]);
+                        console.log(`✅ Successfully removed ${userToRemove} from ${chat.name || testData.groupId}`);
+
+                        // Send message to user
+                        await client.sendMessage(
+                            senderId,
+                            '❌ נכשלת במבחן. הוסרת מהקבוצה.'
+                        );
+
+                        // Send admin alert - use the phone number for display
+                        const phoneDisplay = userToRemove.split('@')[0];
+                        await sendAdminAlert(
+                            client,
+                            `משתמש ${phoneDisplay} נכשל במבחן והוסר מהקבוצה ${chat.name || testData.groupId}
+                            Phone Display: ${phoneDisplay3}`
+                        );
+
+                        // Add to blacklist using the real JID for consistency
+                        addToBlacklist(senderId);
+                        const blacklistResults = await addUserToBlacklistWithLid(message, addToBlacklist);
+                    } catch (removeError) {
+                        console.error(`❌ Error removing ${userToRemove} from group:`, removeError);
+
+                        // Send message to user
+                        await client.sendMessage(
+                            senderId,
+                            '❌ נכשלת במבחן. לא ניתן היה להסיר אותך מהקבוצה.'
+                        );
+
+                        // Send admin alert about the error
+                        const phoneDisplay = userToRemove.split('@')[0];
+                        await sendAdminAlert(
+                            client,
+                            `שגיאה בהסרת משתמש ${phoneDisplay} מהקבוצה: ${removeError.message}`
+                        );
+                    }
+                } catch (err) {
+                    console.error('Error while removing user from group:', err);
 
                     // Send admin alert about the error
-                    const phoneDisplay = userToRemove.split('@')[0];
+                    const phoneDisplay = (testData.originalId || senderId).split('@')[0];
                     await sendAdminAlert(
                         client,
-                        `שגיאה בהסרת משתמש ${phoneDisplay} מהקבוצה: ${removeError.message}`
+                        `שגיאה בהסרת משתמש ${phoneDisplay} מהקבוצה: ${err.message}`
                     );
                 }
-            } catch (err) {
-                console.error('Error while removing user from group:', err);
 
-                // Send admin alert about the error
-                const phoneDisplay = (testData.originalId || senderId).split('@')[0];
-                await sendAdminAlert(
-                    client,
-                    `שגיאה בהסרת משתמש ${phoneDisplay} מהקבוצה: ${err.message}`
+                // Cleanup
+                activeTests.delete(senderId);
+                updateTestAttempts(senderId, false);
+                pendingUsers.delete(senderId);
+
+                const attempts = getTestAttempts(senderId);
+                if (attempts.attempts === 1) {
+                    failedOnceUsers.set(senderId, { timestamp: Date.now(), groupId: testData.groupId });
+                } else if (attempts.attempts >= 2) {
+                    addToBlacklist(senderId);
+                    const blacklistResults = await addUserToBlacklistWithLid(message, addToBlacklist);
+                    failedOnceUsers.delete(senderId);
+                }
+                console.log(`משתמש ${senderId} נכשל במבחן`);
+            } else {
+                // Failed this question, but not the whole test yet. Prepare next question.
+                const nextQuestion = generateTestQuestion();
+                testData.currentQuestion = nextQuestion;
+                const totalAnswered = testData.correctAnswers + testData.wrongAnswers;
+                const nextIndex = totalAnswered + 1; // This is correct as wrongAnswers has been incremented
+
+                await client.sendMessage(
+                    senderId,
+                    `❌ לא נכון. שאלה ${nextIndex}/3:\n${nextQuestion.question}`
                 );
+                activeTests.set(senderId, testData);
             }
-
-            // Cleanup
-            activeTests.delete(senderId);
-            updateTestAttempts(senderId, false);
-            pendingUsers.delete(senderId);
-
-            const attempts = getTestAttempts(senderId);
-            if (attempts.attempts === 1) {
-                failedOnceUsers.set(senderId, { timestamp: Date.now(), groupId: testData.groupId });
-            } else if (attempts.attempts >= 2) {
-                addToBlacklist(senderId);
-                const blacklistResults = await addUserToBlacklistWithLid(message, addToBlacklist);
-                failedOnceUsers.delete(senderId);
-            }
-            console.log(`משתמש ${senderId} נכשל במבחן`);
-        }
-        else {
-            const nextQuestion = generateTestQuestion();
-            testData.currentQuestion = nextQuestion;
-
-            // how many questions have already been answered?
-            const totalAnswered = testData.correctAnswers + testData.wrongAnswers;
-            // the next question we are about to ask (1-based)
-            const nextIndex = totalAnswered + 1;
-
-            await client.sendMessage(
-                senderId,
-                `${userAnswer === correctAnswer ? '✅ נכון!' : '❌ לא נכון.'} ` +
-                `שאלה ${nextIndex}/3:\n${nextQuestion.question}`
-            );
-            activeTests.set(senderId, testData);
         }
     }
 }
