@@ -964,10 +964,16 @@ client.on('message', async message => {
         }
         log(`Message from ${realJid} passed warning word checks.`, `${stagePrefix}_CONTENT_CHECK`);
 
+        const firstLinkInMessage = (message.body.match(/(?:https?:\/\/|www\.)[^\s]+/i) || [])[0];
+
         if (hasLink && !isApproved(realJid) && !isImmune(realJid) && !isAdmin(realJid)) {
-            log(`User ${realJid} (not approved/immune/admin) sent a link. Initiating verification process. Link message: "${message.body}"`, `${stagePrefix}_UNVERIFIED_LINK`);
-            try {
-                let deletedOK = false;
+            // בדיקה אם הקישור מותר
+            if (firstLinkInMessage && botConfig.isWhitelistedLink(firstLinkInMessage)) {
+                log(`User ${realJid} sent a whitelisted link: "${firstLinkInMessage}". Allowing message.`, `${stagePrefix}_WHITELISTED_LINK`);
+            } else {
+                log(`User ${realJid} (not approved/immune/admin) sent a non-whitelisted link: "${firstLinkInMessage}". Initiating verification process. Link message: "${message.body}"`, `${stagePrefix}_UNVERIFIED_LINK`);
+                try {
+                    let deletedOK = false;
                 try {
                     await message.delete(true);
                     deletedOK = true;
@@ -1058,9 +1064,14 @@ client.on('message', async message => {
                 logError('שגיאה בטיפול בקישור לא מאומת:', `${stagePrefix}_UNVERIFIED_LINK_ERROR`, err);
             }
             return;
-        }
-        else if (hasLink) {
-            log(`User ${realJid} sent a link and is approved/immune/admin. Link allowed. Message: "${message.body}"`, `${stagePrefix}_VERIFIED_LINK`);
+        } // סגירת ה-else של הבדיקה אם הקישור מותר
+        } // סגירת ה-if של בדיקת hasLink ואישורים
+        else if (hasLink) { // זה המקום לבדוק אם משתמש מאושר שלח קישור (גם אם הוא ווייטליסטד או לא)
+            if (firstLinkInMessage && botConfig.isWhitelistedLink(firstLinkInMessage)) {
+                log(`User ${realJid} (approved/immune/admin) sent a whitelisted link: "${firstLinkInMessage}". Link allowed. Message: "${message.body}"`, `${stagePrefix}_VERIFIED_WHITELISTED_LINK`);
+            } else {
+                log(`User ${realJid} (approved/immune/admin) sent a regular link: "${firstLinkInMessage}". Link allowed. Message: "${message.body}"`, `${stagePrefix}_VERIFIED_LINK`);
+            }
         }
 
 
@@ -1338,6 +1349,47 @@ client.on('message', async message => {
                     await message.reply(`✅ ${phoneDigits} הוסר מהרשימה השחורה ויוכל להצטרף שוב לקבוצות.`);
                     return;
                 }
+            }
+             // הוספת פקודת /addlink
+            if (messageText === '/addlink') {
+                log(`Admin ${senderId} initiated /addlink command.`, adminCommandStage);
+                userStates.set(senderId, { waitingForWhitelistedLink: true });
+                await message.reply('אנא שלח את הקישור שתרצה להוסיף לרשימת המותרים (whitelist) בתגובה להודעה זו.');
+                return;
+            }
+
+            // טיפול בהוספת קישור ל-whitelist
+            if (userState && userState.waitingForWhitelistedLink) {
+                if (message.hasQuotedMsg) {
+                    const quotedMsg = await message.getQuotedMessage();
+                    // ודא שההודעה המצוטטת היא ההודעה של הבוט שביקשה את הקישור
+                    if (quotedMsg.fromMe && quotedMsg.body.includes('אנא שלח את הקישור שתרצה להוסיף לרשימת המותרים')) {
+                        const linkToAdd = message.body.trim();
+                        log(`Admin ${senderId} sent link to whitelist: "${linkToAdd}"`, adminActionStage);
+                        if (linkToAdd) {
+                            // ניקוי בסיסי של הקישור - הסרת http/https ו-www.
+                            const cleanedLink = linkToAdd.toLowerCase().replace(/^(?:https?:\/\/)?(?:www\.)?/, '').split('/')[0];
+                            if (cleanedLink) {
+                                if (botConfig.addWhitelistedLink(cleanedLink)) {
+                                    log(`Link "${cleanedLink}" added to whitelist by admin ${senderId}.`, adminActionStage);
+                                    await message.reply(`✅ הקישור "${cleanedLink}" נוסף בהצלחה לרשימת המותרים.`);
+                                } else {
+                                    logError(`Failed to add link "${cleanedLink}" to whitelist by admin ${senderId}.`, adminActionStage);
+                                    await message.reply('❌ שגיאה בהוספת הקישור. בדוק את הלוגים.');
+                                }
+                            } else {
+                                await message.reply('❌ הקישור שנשלח לא תקין לאחר ניקוי.');
+                            }
+                        } else {
+                            await message.reply('❌ לא נשלח קישור.');
+                        }
+                        userStates.delete(senderId);
+                        return;
+                    }
+                }
+                // אם לא תגובה להודעה הנכונה, או אין ציטוט
+                await message.reply('יש לשלוח את הקישור בתגובה להודעה הקודמת של הבוט.');
+                return;
             }
         }
 
