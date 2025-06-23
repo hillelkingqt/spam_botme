@@ -1,138 +1,140 @@
-// Temporary fix for WhatsApp Web.js participant removal issue
-// This function works around the compatibility problem
+// remove-user-fix.js
+module.exports = (dependencies) => {
+    const { log, logError, formatPhoneNumberToE164, isGroupAdmin, addToBlacklist, botConfig } = dependencies;
+    const STAGE_PREFIX = "REMOVE_USER_FIX";
 
-async function removeUserFromGroupFixed(client, phoneNumber, groupId) {
-    try {
-        // Format the phone number
-        const formattedNumber = phoneNumber.replace(/[^\d]/g, '');
-        const participantId = formattedNumber.includes('@') ? formattedNumber : `${formattedNumber}@c.us`;
-        
-        console.log(`Attempting to remove ${participantId} from ${groupId}`);
-        
-        // Use direct evaluation to bypass WhatsApp Web.js wrapper
-        const result = await client.pupPage.evaluate(async (gId, pId) => {
-            try {
-                // Get the chat using internal WhatsApp methods
-                const chat = window.Store.Chat.get(gId);
-                if (!chat) throw new Error('Chat not found');
-                
-                // Get the current participants
-                const participants = chat.groupMetadata?.participants;
-                if (!participants) throw new Error('No participants found');
-                
-                // Find the participant
-                const participant = participants.find(p => 
-                    p.id === pId || 
-                    p.id._serialized === pId ||
-                    p.id.user === pId.replace('@c.us', '')
-                );
-                
-                if (!participant) throw new Error('Participant not found in group');
-                
-                // Use the internal WhatsApp store method directly
-                const wid = window.Store.WidFactory.createWid(participant.id);
-                await window.Store.GroupUtils.removeParticipants(chat.id, [wid]);
-                
-                return { success: true, message: 'Participant removed successfully' };
-            } catch (error) {
-                return { success: false, error: error.message };
-            }
-        }, groupId, participantId);
-        
-        return result;
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-}
-
-// Updated kickUserFromAllGroups function
-async function kickUserFromAllGroupsFixed(client, rawNumber) {
-    const e164 = formatPhoneNumberToE164(rawNumber);
-    if (!e164) {
-        return { success: false, error: 'invalid_number' };
-    }
-    
-    const results = {
-        success: true,
-        phoneNumber: e164,
-        removedFromGroups: 0,
-        failedGroups: 0,
-        groupsNotAdmin: 0,
-        totalDeletedMessages: 0,
-        groupResults: []
-    };
-    
-    const groups = Array.from(botConfig.managedGroups || []);
-    
-    for (const groupId of groups) {
+    async function removeUserFromGroupFixed(client, phoneNumber, groupId) {
+        const stage = `${STAGE_PREFIX}_SINGLE_GROUP[${groupId}]`;
+        log(`Attempting fixed removal of ${phoneNumber} from group ${groupId}`, stage);
         try {
-            const chat = await client.getChatById(groupId);
-            const groupName = chat.name || groupId;
-            
-            // Check if bot is admin
-            if (!(await isGroupAdmin(client, groupId))) {
-                results.groupsNotAdmin++;
-                results.groupResults.push({ 
-                    group: groupName, 
-                    removed: false, 
-                    error: 'bot_not_admin' 
-                });
-                continue;
-            }
-            
-            // Try to remove user
-            const removeResult = await removeUserFromGroupFixed(client, e164, groupId);
-            
-            if (removeResult.success) {
-                results.removedFromGroups++;
-                results.groupResults.push({ 
-                    group: groupName, 
-                    removed: true, 
-                    error: '' 
-                });
-                
-                // Try to delete messages
+            const formattedNumber = phoneNumber.replace(/[^\d]/g, '');
+            const participantId = formattedNumber.includes('@') ? formattedNumber : `${formattedNumber}@c.us`;
+            log(`Formatted participantId: ${participantId} for removal from ${groupId}`, stage);
+
+            const result = await client.pupPage.evaluate(async (gId, pId) => {
                 try {
-                    const msgs = await chat.fetchMessages({ limit: 100 });
-                    for (const msg of msgs) {
-                        if (msg.author === `${e164}@c.us` || msg.from === `${e164}@c.us`) {
-                            try {
-                                await msg.delete(true);
-                                results.totalDeletedMessages++;
-                            } catch (e) {}
-                        }
-                    }
-                } catch (e) {}
-                
+                    const chat = window.Store.Chat.get(gId);
+                    if (!chat) throw new Error('Store: Chat not found');
+
+                    const groupMetadata = chat.groupMetadata;
+                    if (!groupMetadata || !groupMetadata.participants) throw new Error('Store: No participants found in group metadata');
+
+                    const participants = groupMetadata.participants.getModelsArray ? groupMetadata.participants.getModelsArray() : groupMetadata.participants;
+
+                    const participant = participants.find(p =>
+                        p.id === pId ||
+                        p.id._serialized === pId ||
+                        p.id.user === pId.replace('@c.us', '')
+                    );
+
+                    if (!participant) throw new Error(`Store: Participant ${pId} not found in group`);
+
+                    const wid = window.Store.WidFactory.createWid(participant.id._serialized || participant.id);
+                    await window.Store.GroupUtils.removeParticipants(chat.id, [wid]);
+                    return { success: true, message: `Store: Participant ${pId} removed successfully` };
+                } catch (error) {
+                    return { success: false, error: error.message, stack: error.stack };
+                }
+            }, groupId, participantId);
+
+            if (result.success) {
+                log(`Successfully removed ${participantId} from ${groupId} using fixed Store method. Message: ${result.message}`, stage);
             } else {
-                results.failedGroups++;
-                results.groupResults.push({ 
-                    group: groupName, 
-                    removed: false, 
-                    error: removeResult.error 
-                });
+                logError(`Failed to remove ${participantId} from ${groupId} using fixed Store method: ${result.error}`, stage, result.stack ? { message: result.error, stack: result.stack } : new Error(result.error));
             }
-            
+            return result;
         } catch (error) {
-            results.failedGroups++;
-            results.groupResults.push({ 
-                group: groupId, 
-                removed: false, 
-                error: error.message 
-            });
+            logError(`Critical error in removeUserFromGroupFixed for ${phoneNumber} from ${groupId}: ${error.message}`, stage, error);
+            return { success: false, error: error.message };
         }
     }
-    
-    // Add to blacklist
-    if (typeof addToBlacklist === 'function') {
-        addToBlacklist(`${e164}@c.us`);
-    }
-    
-    return results;
-}
 
-// Export the functions
-module.exports = {
-    removeUserFromGroupFixed,
-    kickUserFromAllGroupsFixed
+    async function kickUserFromAllGroupsFixed(client, rawNumber) {
+        const stage = `${STAGE_PREFIX}_KICK_ALL[${rawNumber}]`;
+        log(`Starting fixed kick for user ${rawNumber} from all managed groups.`, stage);
+
+        const e164 = formatPhoneNumberToE164(rawNumber);
+        if (!e164) {
+            logError(`Invalid raw number ${rawNumber} provided. Cannot format to E164.`, stage);
+            return { success: false, error: 'invalid_number_format' };
+        }
+        log(`Formatted number ${rawNumber} to E164: ${e164}`, stage);
+
+        const results = {
+            success: true, phoneNumber: e164, removedFromGroups: 0, failedGroups: 0,
+            groupsNotAdmin: 0, totalDeletedMessages: 0, groupResults: []
+        };
+        
+        const groupsToProcess = Array.from(botConfig.managedGroups || []);
+        log(`Will process ${groupsToProcess.length} managed groups.`, stage);
+        
+        for (const groupId of groupsToProcess) {
+            const groupStage = `${stage}_GROUP[${groupId}]`;
+            let groupName = groupId;
+            try {
+                const chat = await client.getChatById(groupId);
+                groupName = chat.name || groupId;
+                log(`Processing group ${groupName} for removal of ${e164}.`, groupStage);
+                
+                if (!(await isGroupAdmin(client, groupId))) { // isGroupAdmin now has its own logging
+                    log(`Bot is not admin in ${groupName}. Skipping.`, groupStage);
+                    results.groupsNotAdmin++;
+                    results.groupResults.push({ group: groupName, removed: false, error: 'bot_not_admin' });
+                    continue;
+                }
+                
+                const removeResult = await removeUserFromGroupFixed(client, e164, groupId); // This function now logs
+                
+                if (removeResult.success) {
+                    log(`Successfully removed ${e164} from ${groupName}.`, groupStage);
+                    results.removedFromGroups++;
+                    results.groupResults.push({ group: groupName, removed: true, error: '' });
+
+                    const wipeStage = `${groupStage}_MSG_WIPE`;
+                    log(`Attempting to delete messages for ${e164} in ${groupName}.`, wipeStage);
+                    try {
+                        const msgs = await chat.fetchMessages({ limit: 100 });
+                        let wipedCountThisGroup = 0;
+                        for (const msg of msgs) {
+                            if (msg.author === `${e164}@c.us` || msg.from === `${e164}@c.us`) {
+                                try {
+                                    await msg.delete(true);
+                                    results.totalDeletedMessages++;
+                                    wipedCountThisGroup++;
+                                } catch (e) {
+                                    logError(`Failed to delete message ${msg.id._serialized} from ${e164} in ${groupName}: ${e.message}`, wipeStage, e);
+                                }
+                            }
+                        }
+                        log(`Wiped ${wipedCountThisGroup} messages for ${e164} in ${groupName}.`, wipeStage);
+                    } catch (e) {
+                        logError(`Error fetching messages for wipe in ${groupName}: ${e.message}`, wipeStage, e);
+                    }
+                } else {
+                    logError(`Failed to remove ${e164} from ${groupName}. Error: ${removeResult.error}`, groupStage);
+                    results.failedGroups++;
+                    results.groupResults.push({ group: groupName, removed: false, error: removeResult.error });
+                }
+            } catch (error) {
+                logError(`Error processing group ${groupName} for user ${e164}: ${error.message}`, groupStage, error);
+                results.failedGroups++;
+                results.groupResults.push({ group: groupName, removed: false, error: error.message });
+            }
+        }
+
+        if (typeof addToBlacklist === 'function') {
+            log(`Adding ${e164}@c.us to blacklist after processing all groups.`, stage);
+            addToBlacklist(`${e164}@c.us`); // addToBlacklist has its own logging
+        } else {
+            logError("addToBlacklist function not available in remove-user-fix module.", stage);
+        }
+
+        log(`Finished fixed kick process for ${rawNumber}. Results: ${JSON.stringify(results, null, 2)}`, stage);
+        return results;
+    }
+
+    return {
+        removeUserFromGroupFixed,
+        kickUserFromAllGroupsFixed
+    };
 };
