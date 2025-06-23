@@ -32,89 +32,7 @@ class BotConfig {
         this.loadManagedGroups();
         this.loadApprovedUsers();
         this.loadBlacklistedUsers();
-        this.loadWhitelistedLinks(); // הוספת טעינת קישורים מותרים
     }
-
-    // טעינת קישורים מותרים מהקובץ
-    loadWhitelistedLinks() {
-        try {
-            const filePath = path.join(__dirname, 'data/whitelist.json');
-            if (fs.existsSync(filePath)) {
-                const data = fs.readFileSync(filePath, 'utf8');
-                const links = JSON.parse(data);
-                this.whitelistedLinks = new Set(links);
-                console.log('נטענו קישורים מותרים:', {
-                    count: this.whitelistedLinks.size,
-                    links: Array.from(this.whitelistedLinks)
-                });
-            } else {
-                console.log('קובץ קישורים מותרים לא קיים, יוצר קובץ חדש עם ערכי ברירת מחדל...');
-                this.whitelistedLinks = new Set([
-                    "zoom.us",
-                    "youtube.com",
-                    "youtu.be",
-                    "openu.co.il"
-                ]);
-                this.saveWhitelistedLinks();
-            }
-        } catch (error) {
-            console.error('שגיאה בטעינת קישורים מותרים:', error);
-            this.whitelistedLinks = new Set([ // Fallback to default values on error
-                "zoom.us",
-                "youtube.com",
-                "youtu.be",
-                "openu.co.il"
-            ]);
-        }
-    }
-
-    // שמירת קישורים מותרים לקובץ
-    saveWhitelistedLinks() {
-        try {
-            const filePath = path.join(__dirname, 'data/whitelist.json');
-            const links = Array.from(this.whitelistedLinks);
-            const data = JSON.stringify(links, null, 2);
-            fs.writeFileSync(filePath, data);
-            console.log('נשמרו קישורים מותרים:', {
-                count: links.length,
-                links: links
-            });
-            return true;
-        } catch (error) {
-            console.error('שגיאה בשמירת קישורים מותרים:', error);
-            return false;
-        }
-    }
-
-    // הוספת קישור מותר
-    addWhitelistedLink(link) {
-        if (typeof link !== 'string' || link.trim() === '') {
-            console.error('ניסיון להוסיף קישור לא תקין ל-whitelist:', link);
-            return false;
-        }
-        const cleanedLink = link.trim().toLowerCase();
-        this.whitelistedLinks.add(cleanedLink);
-        return this.saveWhitelistedLinks();
-    }
-
-    // בדיקה האם קישור מותר
-    isWhitelistedLink(link) {
-        if (typeof link !== 'string' || link.trim() === '') {
-            return false;
-        }
-        const urlParts = link.toLowerCase().match(/^(?:https?:\/\/)?(?:www\.)?([^\/]+)/);
-        if (urlParts && urlParts[1]) {
-            const domain = urlParts[1];
-            // בדיקה ישירה של הדומיין
-            if (this.whitelistedLinks.has(domain)) {
-                return true;
-            }
-            // בדיקה של תת-דומיין (למשל, meet.google.com מול google.com)
-            return Array.from(this.whitelistedLinks).some(whitelistedDomain => domain.endsWith('.' + whitelistedDomain) || domain === whitelistedDomain);
-        }
-        return false;
-    }
-
 
     // טעינת קבוצות מנוהלות מהקובץ
     loadManagedGroups() {
@@ -318,8 +236,7 @@ class BotConfig {
             approvedUsers: Array.from(this.approvedUsers),
             blacklistedUsers: Array.from(this.blacklistedUsers),
             activeTests: Array.from(this.activeTests),
-            adminUsers: Array.from(this.adminUsers),
-            whitelistedLinks: Array.from(this.whitelistedLinks) // הוספת קישורים מותרים לנתונים
+            adminUsers: Array.from(this.adminUsers)
         };
     }
 
@@ -328,7 +245,6 @@ class BotConfig {
         this.loadManagedGroups();
         this.loadApprovedUsers();
         this.loadBlacklistedUsers();
-        this.loadWhitelistedLinks(); // טעינה מחדש של קישורים מותרים
     }
 }
 
