@@ -403,7 +403,15 @@ async function isGroupAdmin(client, groupId) {
 
         // Method 1: Standard participant check
         try {
+            if (!groupId) {
+                console.error(`[ADMIN CHECK] Invalid groupId passed to isGroupAdmin: ${groupId}`);
+                throw new Error("Invalid groupId provided to isGroupAdmin");
+            }
             const chat = await client.getChatById(groupId);
+            if (!chat || !chat.id || !chat.id._serialized) {
+                console.error(`[ADMIN CHECK] getChatById returned invalid chat object or chat.id for groupId: ${groupId}. Chat object:`, chat);
+                throw new Error("Invalid chat object or chat.id received from getChatById");
+            }
             console.log(`[ADMIN CHECK] Got chat: ${chat.name || groupId}`);
 
             // Try to refresh metadata if possible
@@ -672,15 +680,29 @@ const warningWords = [
 
 
 function messageHasProhibitedWord(message) {
-    const lower = message.toLowerCase();
-    return prohibitedWords.some(word => {
-        const escaped = escapeRegExp(word.toLowerCase());
+    const lowerMessage = message.toLowerCase();
+    // Ensure 'clean' function is accessible here or defined globally/imported
+    // For now, assuming 'clean' is available in this scope.
+    // If not, it's defined around line 641: function clean(text) { ... }
+    const cleanedLowerMessage = clean(lowerMessage);
+
+    for (const word of prohibitedWords) {
+        const lowerWord = word.toLowerCase();
+        // escapeRegExp is defined around line 649
+        const escapedCleanWord = escapeRegExp(clean(lowerWord)); // Clean the prohibited word for pattern
+        const escapedRawWord = escapeRegExp(lowerWord); // Raw escaped word for multi-word phrases
+
         const isMultiWord = word.includes(" ");
+
         const pattern = isMultiWord
-            ? new RegExp(escaped, 'u')  // אין גבולות מילה – רווחים עושים את העבודה
-            : new RegExp(`\\b${escaped}\\b`, 'u');  // חייבים גבולות מילה
-        return pattern.test(lower);
-    });
+            ? new RegExp(escapedRawWord, 'u') // Multi-word phrases match against raw lowerMessage
+            : new RegExp(`(?:^|\\P{L})${escapedCleanWord}(?:\\P{L}|$)`, 'ui'); // Single words match against cleanedLowerMessage
+
+        if (pattern.test(isMultiWord ? lowerMessage : cleanedLowerMessage)) {
+            return word; // Return the original matched word (not the lowercased/cleaned version)
+        }
+    }
+    return null; // No match
 }
 
 // עוזר: מוציא את כל "המילים" כ-tokens על בסיס אותיות Unicode
@@ -734,13 +756,15 @@ function escapeRegExp(str) {
 function messageContainsBlockedRoot(message, blockedRoots = singleWords) {
     const cleanMsg = clean(message);
 
-    return blockedRoots.some(root => {
-        const word = clean(root);                 // normalise the root too
-        const pattern =
-            `(?:^|\\P{L})${escapeRegExp(word)}(?:\\P{L}|$)`; // boundaries
-        const re = new RegExp(pattern, 'ui');      // u = Unicode, i = ignore-case
-        return re.test(cleanMsg);
-    });
+    for (const root of blockedRoots) {
+        const word = clean(root); // normalise the root too
+        const pattern = `(?:^|\\P{L})${escapeRegExp(word)}(?:\\P{L}|$)`; // boundaries
+        const re = new RegExp(pattern, 'ui'); // u = Unicode, i = ignore-case
+        if (re.test(cleanMsg)) {
+            return root; // Return the matched root
+        }
+    }
+    return null; // No match
 }
 
 
@@ -823,10 +847,15 @@ client.on('message', async message => {
     if (isGroup) {
         console.log(`הודעה התקבלה מ-${realJid} (${isGroup ? 'קבוצה' : 'קבוצה'})`);
         // 1. בדוק אם הבוט הוא מנהל בקבוצה
-        const isBotAdmin = await isGroupAdmin(client, chat.id._serialized);
-        console.log(`בדיקת מנהל: ${isBotAdmin ? 'הבוט הוא מנהל' : 'הבוט אינו מנהל'}`);
-        if (!isBotAdmin) return;
-        console.log(`הבוט מנהל בקבוצה ${chat.name || chat.id._serialized}`);
+        if (chat.id && chat.id._serialized) {
+            const isBotAdmin = await isGroupAdmin(client, chat.id._serialized);
+            console.log(`בדיקת מנהל: ${isBotAdmin ? 'הבוט הוא מנהל' : 'הבוט אינו מנהל'}`);
+            if (!isBotAdmin) return;
+            console.log(`הבוט מנהל בקבוצה ${chat.name || chat.id._serialized}`);
+        } else {
+            console.error(`[ADMIN CHECK] Invalid chat.id or chat.id._serialized for group in message handler. Chat ID: ${chat.id}, Chat Name: ${chat.name}`);
+            return; // Cannot proceed without a valid group ID
+        }
         // 2. blacklist
         if (isBlacklisted(realJid)) {
             try {
@@ -853,31 +882,40 @@ client.on('message', async message => {
         console.log(`המשתמש ${senderId} אינו מנהל או חסין`);
 
         // 5. מילים אסורות
-        //Changes: From "messageHasSingleWordFromList(" הי " + message.body + " dov "))" to :"messageContainsBlockedRoot(message.body)"
-        if (messageHasProhibitedWord(message.body + " dov ") || messageContainsBlockedRoot(message.body)) {
+        let matchedForbiddenWord = messageHasProhibitedWord(message.body);
+        if (!matchedForbiddenWord) {
+            matchedForbiddenWord = messageContainsBlockedRoot(message.body);
+        }
+
+        if (matchedForbiddenWord) {
             try {
-                console.log(`הודעה עם מילה אסורה: ${message.body}`);
+                console.log(`הודעה עם מילה אסורה "${matchedForbiddenWord}": ${message.body}`);
+                const realJidForAction = await getRealSenderJid(message); // Get real JID for actions
+
                 await message.delete(true);
-                await chat.removeParticipants([senderId]);
-                //await sendAdminAlert(client, `המשתמש ${senderId} הוסר מהקבוצה ${chat.name || chat.id._serialized} עקב שליחת מילה אסורה: ${message.body}`);
-                await alertRemoval(client, 'מילה אסורה', message, chat.name || chat.id._serialized);
-                const senderJid = await getRealSenderJid(message);
-                const phoneNumber = senderJid;
-                console.log(phoneNumber);
-                try {
-                    await addToBlacklist(phoneNumber);
-                    const blacklistResults = await addUserToBlacklistWithLid(message, addToBlacklist);
+
+                // Use realJidForAction if available, otherwise fallback to senderId (original behavior for safety)
+                const participantToRemove = realJidForAction || senderId;
+                await chat.removeParticipants([participantToRemove]);
+
+                await alertRemoval(client, `מילה אסורה: "${matchedForbiddenWord}"`, message, chat.name || chat.id._serialized);
+
+                if (realJidForAction) {
+                    const phoneNumber = realJidForAction.split('@')[0];
+                    console.log(`משתמש ${phoneNumber} (${realJidForAction}) ביצע עבירה.`);
+                    // Assuming addToBlacklist and addUserToBlacklistWithLid expect the real JID
+                    // addUserToBlacklistWithLid takes the message object, it likely calls getRealSenderJid internally.
+                    await addToBlacklist(realJidForAction);
+                    await addUserToBlacklistWithLid(message, addToBlacklist);
+                } else {
+                    // Fallback if realJidForAction couldn't be determined, though getRealSenderJid should usually work
+                    console.warn(`Could not determine realJid for blacklisting sender: ${senderId}. Blacklisting senderId.`);
+                    await addToBlacklist(senderId);
+                    await addUserToBlacklistWithLid(message, addToBlacklist); // Let it try with the message object
                 }
-                catch {
-                    await addToBlacklist(senderJid); // הוספה לרשימה השחורה
-                    const blacklistResults = await addUserToBlacklistWithLid(message, addToBlacklist);
-                }; // הוספה לרשימה השחורה
 
-            }
-
-            // add to the jason file
-            catch (error) {
-                console.error(`שגיאה במחיקת הודעת קישור של ${senderId}:`, error);
+            } catch (error) {
+                console.error(`שגיאה בטיפול במילה אסורה (${matchedForbiddenWord}) ממשתמש ${senderId}:`, error);
             }
             return;
         }
@@ -1667,6 +1705,10 @@ client.on('**', (event) => {
 // הוספת האזנה לאירוע כניסה לקבוצה
 client.on('group_join', async (notification) => {
     try {
+        if (!notification.id || !notification.id._serialized) {
+            console.error(`[GROUP JOIN] Invalid notification.id or notification.id._serialized. Notification:`, notification);
+            return; // Cannot process join without a valid group ID
+        }
         const groupId = notification.id._serialized;
         const userId = notification.author;
 
