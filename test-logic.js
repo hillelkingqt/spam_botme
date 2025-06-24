@@ -2,6 +2,11 @@
 const fs = require('fs');
 const botConfig = require('./config');
 
+// Normalize WhatsApp IDs to digits only
+function normalizeId(id) {
+    return id ? id.toString().replace(/\D/g, '') : '';
+}
+
 // Load suspicious users list
 let suspiciousUsers = [];
 try {
@@ -200,12 +205,12 @@ async function startTest(client, userId, groupId, reason = '', message = null, g
 
 // פונקציה לבדיקה אם משתמש עבר מבחן
 function hasPassedTest(userId) {
-    return botConfig.isApprovedUser(userId);
+    return botConfig.isApprovedUser(normalizeId(userId));
 }
 
 // פונקציה להוספת משתמש לרשימת המאושרים
 function addApprovedUser(userId) {
-    return botConfig.approveUser(userId);
+    return botConfig.approveUser(normalizeId(userId));
 }
 
 // פונקציה לקבלת מבחן פעיל
