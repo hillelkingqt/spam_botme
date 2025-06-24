@@ -965,9 +965,18 @@ client.on('message', async message => {
         log(`Message from ${realJid} passed warning word checks.`, `${stagePrefix}_CONTENT_CHECK`);
 
         if (hasLink && !isApproved(realJid) && !isImmune(realJid) && !isAdmin(realJid)) {
-            log(`User ${realJid} (not approved/immune/admin) sent a link. Initiating verification process. Link message: "${message.body}"`, `${stagePrefix}_UNVERIFIED_LINK`);
-            try {
-                let deletedOK = false;
+            const isUserApproved = isApproved(realJid); // Check approval status
+            log(`Link detected from ${realJid}. User approved status: ${isUserApproved}. Immune: ${isImmune(realJid)}, Admin: ${isAdmin(realJid)}. APPROVED_USERS size: ${APPROVED_USERS.size}`, `${stagePrefix}_LINK_CHECK`);
+            // Log a sample of approved users if the set is small, for easier debugging
+            if (APPROVED_USERS.size > 0 && APPROVED_USERS.size < 10) {
+                log(`Sample of APPROVED_USERS: ${JSON.stringify(Array.from(APPROVED_USERS).slice(0, 5))}`, `${stagePrefix}_LINK_CHECK_DETAIL`);
+            }
+
+            // The actual condition for proceeding with verification:
+            if (!isUserApproved && !isImmune(realJid) && !isAdmin(realJid)) {
+                log(`User ${realJid} (not approved/immune/admin) sent a link. Initiating verification process. Link message: "${message.body}"`, `${stagePrefix}_UNVERIFIED_LINK`);
+                try {
+                    let deletedOK = false;
                 try {
                     await message.delete(true);
                     deletedOK = true;
@@ -1441,17 +1450,33 @@ async function handleTestAnswer(client, message, senderId) {
             log(`User ${senderId} passed the test! (3 correct answers). Original ID: ${testData.originalId}, Real JID: ${testData.realJid}`, testStage);
 
             // Use realJid (private chat ID) for approved list
-            await addApprovedUser(testData.realJid);
-            APPROVED_USERS.add(testData.realJid);
-            log(`User ${testData.realJid} added to approved users.`, testStage);
+            const mainJidToApprove = testData.realJid; // JID from private chat, expected @c.us
+            const groupMessageJid = testData.originalId; // JID from the group message, could be @lid or @c.us
+
+            log(`User ${mainJidToApprove} passed the test. Original group JID: ${groupMessageJid}. Adding to approved list.`, testStage);
+
+            await addApprovedUser(mainJidToApprove);
+            APPROVED_USERS.add(mainJidToApprove);
+            log(`Successfully added main JID ${mainJidToApprove} to approved users.`, testStage);
+
+            if (groupMessageJid && groupMessageJid !== mainJidToApprove && typeof groupMessageJid === 'string' && groupMessageJid.includes('@')) {
+                log(`Original group JID ${groupMessageJid} is different and valid. Adding it to approved users as well.`, testStage);
+                await addApprovedUser(groupMessageJid);
+                APPROVED_USERS.add(groupMessageJid);
+                log(`Successfully added group message JID ${groupMessageJid} to approved users.`, testStage);
+            }
 
             await client.sendMessage(senderId, '✅ עברת את המבחן בהצלחה! כעת תוכל לשלוח קישורים בקבוצה.');
             activeTests.delete(senderId);
             updateTestAttempts(senderId, true); // senderId here is realJid
             failedOnceUsers.delete(senderId);
-            pendingUsers.delete(testData.realJid); // Ensure pending user (link sender) is cleared using realJid
-            log(`User ${senderId} test completed successfully. Cleaned up state.`, testStage);
-            await sendAdminAlert(client, `המשתמש ${testData.realJid} (מקורי: ${testData.originalId}) עבר את מבחן אימות הקישור והוא כעת Approved User.`);
+
+            const keyForPendingDelete = testData.realJid;
+            const wasPending = pendingUsers.has(keyForPendingDelete);
+            pendingUsers.delete(keyForPendingDelete);
+            log(`User ${senderId} test completed successfully. Cleaned up state. Attempted to delete pendingUser with key: ${keyForPendingDelete}. Was present: ${wasPending}. Current pendingUsers size: ${pendingUsers.size}`, testStage);
+
+            await sendAdminAlert(client, `המשתמש ${mainJidToApprove} (מקורי בקישור: ${groupMessageJid}) עבר את מבחן אימות הקישור והוא כעת Approved User.`);
         } else {
             const nextQuestion = generateTestQuestion();
             testData.currentQuestion = nextQuestion;
@@ -2035,25 +2060,37 @@ function isValidE164(num) {
 async function getRealSenderJid(msg) {
     // 1. Prefer explicit author (group), else from (private chat)
     let jid = msg.author || msg.from;
-    const initialJid = jid;
+    const initialJidForLog = jid; // For logging original value
+    log(`getRealSenderJid: Initial JID from msg.author or msg.from: ${initialJidForLog}`, "JID_RESOLUTION_STEP1");
 
     // 2. If it's a link-preview stub → ask WhatsApp for the contact behind it
     if (jid && jid.endsWith('@lid')) {
-        log(`Original JID ${jid} is an LID. Fetching contact...`, "JID_RESOLUTION");
-        const contact = await msg.getContact();   // whatsapp-web.js helper
-        jid = contact.id._serialized;             // e.g. '972501234567@c.us'
-        log(`Resolved LID ${initialJid} to ${jid}`, "JID_RESOLUTION");
+        log(`getRealSenderJid: JID ${jid} is an LID. Attempting to resolve by fetching contact...`, "JID_RESOLUTION_STEP2_LID");
+        try {
+            const contact = await msg.getContact();   // whatsapp-web.js helper
+            if (contact && contact.id && contact.id._serialized) {
+                const resolvedJid = contact.id._serialized;
+                log(`getRealSenderJid: Resolved LID ${jid} to ${resolvedJid} (contact.id._serialized)`, "JID_RESOLUTION_STEP3_SUCCESS");
+                jid = resolvedJid; // e.g. '972501234567@c.us'
+            } else {
+                logError(`getRealSenderJid: Failed to resolve LID ${jid}. msg.getContact() returned invalid contact or contact.id. Contact: ${JSON.stringify(contact)}`, "JID_RESOLUTION_ERROR_LID_FETCH");
+                // Keep original LID if resolution fails
+            }
+        } catch (error) {
+            logError(`getRealSenderJid: Error during msg.getContact() for LID ${jid}: ${error.message}`, "JID_RESOLUTION_ERROR_LID_EXCEPTION", error);
+            // Keep original LID if resolution fails
+        }
     } else {
-        // log(`JID ${jid} is not an LID or is undefined.`, "JID_RESOLUTION");
+        log(`getRealSenderJid: JID ${jid} is not an LID or is undefined. No resolution needed.`, "JID_RESOLUTION_STEP2_NONLID");
     }
 
     if (!jid) {
-        logError(`Could not determine a valid JID from message. Initial: ${initialJid}, msg.author: ${msg.author}, msg.from: ${msg.from}`, "JID_RESOLUTION_ERROR");
+        logError(`getRealSenderJid: Could not determine a valid JID. Initial from msg: ${initialJidForLog}, msg.author: ${msg.author}, msg.from: ${msg.from}. Final JID is null/undefined.`, "JID_RESOLUTION_ERROR_FINAL_NULL");
         // Fallback to a generic unknown if absolutely necessary, though this indicates a problem.
         return "unknown@c.us";
     }
-
-    return jid;  // always something@c.us or something@s.whatsapp.net
+    log(`getRealSenderJid: Final JID to be returned: ${jid}`, "JID_RESOLUTION_STEP4_FINAL");
+    return jid;  // Should be something@c.us or something@s.whatsapp.net, or original @lid if resolution failed
 }
 
 
