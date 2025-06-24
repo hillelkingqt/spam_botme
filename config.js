@@ -1,6 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 
+// Helper to keep ids consistent (strip any non digit characters)
+function normalizeId(id) {
+    return id ? id.toString().replace(/\D/g, '') : '';
+}
+
 // מאגר נתונים משותף לכל המערכת
 class BotConfig {
     constructor() {
@@ -74,7 +79,7 @@ class BotConfig {
             const filePath = path.join(__dirname, 'approved-users.json');
             if (fs.existsSync(filePath)) {
                 const data = fs.readFileSync(filePath, 'utf8');
-                const users = JSON.parse(data);
+                const users = JSON.parse(data).map(normalizeId);
                 console.log(`נטענו ${users.length} משתמשים מאושרים מהקובץ`);
                 this.approvedUsers = new Set(users);
                 return Array.from(this.approvedUsers);
@@ -96,7 +101,7 @@ class BotConfig {
             const filePath = path.join(__dirname, 'blacklist.json');
             if (fs.existsSync(filePath)) {
                 const data = fs.readFileSync(filePath, 'utf8');
-                const users = JSON.parse(data);
+                const users = JSON.parse(data).map(normalizeId);
                 this.blacklistedUsers = new Set(users);
                 console.log('נטענו משתמשים ברשימה השחורה:', users.length);
                 return Array.from(this.blacklistedUsers);
@@ -175,17 +180,20 @@ class BotConfig {
 
     // ניהול משתמשים מאושרים
     approveUser(userId) {
-        this.approvedUsers.add(userId);
+        const id = normalizeId(userId);
+        this.approvedUsers.add(id);
         return this.saveApprovedUsers();
     }
 
     removeApproval(userId) {
-        this.approvedUsers.delete(userId);
+        const id = normalizeId(userId);
+        this.approvedUsers.delete(id);
         return this.saveApprovedUsers();
     }
 
     isApprovedUser(userId) {
-        return this.approvedUsers.has(userId);
+        const id = normalizeId(userId);
+        return this.approvedUsers.has(id);
     }
 
     // ניהול מנהלים
@@ -216,17 +224,20 @@ class BotConfig {
 
     // ניהול רשימה שחורה
     addToBlacklist(userId) {
-        this.blacklistedUsers.add(userId);
+        const id = normalizeId(userId);
+        this.blacklistedUsers.add(id);
         return this.saveBlacklistedUsers();
     }
 
     removeFromBlacklist(userId) {
-        this.blacklistedUsers.delete(userId);
+        const id = normalizeId(userId);
+        this.blacklistedUsers.delete(id);
         return this.saveBlacklistedUsers();
     }
 
     isBlacklisted(userId) {
-        return this.blacklistedUsers.has(userId);
+        const id = normalizeId(userId);
+        return this.blacklistedUsers.has(id);
     }
 
     // קבלת כל הנתונים

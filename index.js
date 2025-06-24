@@ -204,7 +204,7 @@ const IMMUNE_NUMBERS = new Set([
 let APPROVED_USERS;
 try {
     const approvedData = fs.readFileSync(path.join(__dirname, 'approved-users.json'), 'utf8');
-    APPROVED_USERS = new Set(JSON.parse(approvedData));
+    APPROVED_USERS = new Set(JSON.parse(approvedData).map(normalizeId));
 } catch (error) {
     logError('שגיאה בטעינת המשתמשים המאושרים:', 'CONFIG_LOAD', error);
     APPROVED_USERS = new Set();
@@ -519,8 +519,9 @@ function updateTestAttempts(userId, passed) {
 
 // הוספת פונקציה לבדיקת רשימה שחורה
 function isBlacklisted(userId) {
-    log(`Checking blacklist for user: ${userId}. Blacklist size: ${BLACKLIST.size}`, "BLACKLIST_CHECK");
-    return BLACKLIST.has(userId);
+    const id = normalizeId(userId);
+    log(`Checking blacklist for user: ${id}. Blacklist size: ${BLACKLIST.size}`, "BLACKLIST_CHECK");
+    return BLACKLIST.has(id);
 }
 
 // הוספת פונקציה לשליחת הודעה לכל הקבוצות
@@ -784,6 +785,11 @@ function clean(text) {
         .normalize('NFKC')           // canonical form
         .replace(/[\p{M}\p{Cf}]/gu, '') // strip diacritics + zero-width chars
         .toLowerCase();
+}
+
+// Normalize WhatsApp IDs by keeping digits only
+function normalizeId(jid) {
+    return jid ? jid.toString().replace(/\D/g, '') : '';
 }
 
 // Escape characters that are special in RegExp
@@ -1441,9 +1447,10 @@ async function handleTestAnswer(client, message, senderId) {
             log(`User ${senderId} passed the test! (3 correct answers). Original ID: ${testData.originalId}, Real JID: ${testData.realJid}`, testStage);
 
             // Use realJid (private chat ID) for approved list
-            await addApprovedUser(testData.realJid);
-            APPROVED_USERS.add(testData.realJid);
-            log(`User ${testData.realJid} added to approved users.`, testStage);
+            const approvedId = normalizeId(testData.realJid);
+            await addApprovedUser(approvedId);
+            APPROVED_USERS.add(approvedId);
+            log(`User ${approvedId} added to approved users.`, testStage);
 
             await client.sendMessage(senderId, '✅ עברת את המבחן בהצלחה! כעת תוכל לשלוח קישורים בקבוצה.');
             activeTests.delete(senderId);
@@ -1866,7 +1873,8 @@ function isImmune(userId) {
 
 // פונקציה לבדיקה אם משתמש מאושר
 function isApproved(userId) {
-    return APPROVED_USERS.has(userId) || botConfig.isApprovedUser(userId);
+    const id = normalizeId(userId);
+    return APPROVED_USERS.has(id) || botConfig.isApprovedUser(id);
 }
 
 //
@@ -1891,15 +1899,17 @@ function saveBlacklist() {
 }
 
 function addToBlacklist(userId) {
-    log(`Attempting to add user ${userId} to blacklist. Current size: ${BLACKLIST.size}`, "BLACKLIST_ADD");
-    botConfig.addToBlacklist(userId);
-    log(`User ${userId} processed for blacklist addition. New size: ${BLACKLIST.size}. User is on blacklist: ${BLACKLIST.has(userId)}`, "BLACKLIST_ADD");
+    const id = normalizeId(userId);
+    log(`Attempting to add user ${id} to blacklist. Current size: ${BLACKLIST.size}`, "BLACKLIST_ADD");
+    botConfig.addToBlacklist(id);
+    log(`User ${id} processed for blacklist addition. New size: ${BLACKLIST.size}. User is on blacklist: ${BLACKLIST.has(id)}`, "BLACKLIST_ADD");
 }
 
 function removeFromBlacklist(userId) {
-    log(`Attempting to remove user ${userId} from blacklist. Current size: ${BLACKLIST.size}`, "BLACKLIST_REMOVE");
-    botConfig.removeFromBlacklist(userId);
-    log(`User ${userId} processed for blacklist removal. New size: ${BLACKLIST.size}. User is on blacklist: ${BLACKLIST.has(userId)}`, "BLACKLIST_REMOVE");
+    const id = normalizeId(userId);
+    log(`Attempting to remove user ${id} from blacklist. Current size: ${BLACKLIST.size}`, "BLACKLIST_REMOVE");
+    botConfig.removeFromBlacklist(id);
+    log(`User ${id} processed for blacklist removal. New size: ${BLACKLIST.size}. User is on blacklist: ${BLACKLIST.has(id)}`, "BLACKLIST_REMOVE");
 }
 
 // שמירה אוטומטית כל 5 דקות
@@ -1917,7 +1927,7 @@ log("Automatic data saving job scheduled every 5 minutes.", "SCHEDULER");
 // טעינת המשתמשים המאושרים מהקובץ
 try {
     const approvedData = fs.readFileSync(approvedPath, 'utf8');
-    APPROVED_USERS = new Set(JSON.parse(approvedData));
+    APPROVED_USERS = new Set(JSON.parse(approvedData).map(normalizeId));
     log(`משתמשים מאושרים נטענו (${APPROVED_USERS.size} משתמשים): ${Array.from(APPROVED_USERS).join(', ')}`, "CONFIG_LOAD_APPROVED");
 } catch (error) {
     logError('שגיאה בטעינת המשתמשים המאושרים:', "CONFIG_LOAD_APPROVED_ERROR", error);
