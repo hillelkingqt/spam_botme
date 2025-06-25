@@ -217,20 +217,8 @@ try {
 }
 
 // רשימה שחורה (נטען מקובץ/זיכרון)
-// The BLACKLIST variable will now reference the Set managed by botConfig.
-let BLACKLIST = botConfig.blacklistedUsers;
-// Ensure botConfig is initialized and blacklistedUsers is available before this line.
-// If botConfig.blacklistedUsers is not a Set or needs different handling, this will need adjustment.
-try {
-    // Verify that BLACKLIST is a Set, if not, initialize or log error
-    if (!(BLACKLIST instanceof Set)) {
-        logError('botConfig.blacklistedUsers is not a Set, initializing BLACKLIST as a new Set.', 'CONFIG_LOAD');
-        BLACKLIST = new Set(); // Fallback, though ideally botConfig handles this.
-    }
-} catch (error) {
-    logError('שגיאה בהפניית הרשימה השחורה מ-botConfig:', 'CONFIG_LOAD', error);
-    BLACKLIST = new Set(); // Fallback
-}
+// Always reference the blacklist from botConfig to ensure it stays up to date
+// even after botConfig.reloadData() replaces the Set instance.
 
 // רשימת מנהלים לקבלת התראות
 const ALERT_ADMIN_NUMBERS = new Set([
@@ -526,8 +514,9 @@ function updateTestAttempts(userId, passed) {
 // הוספת פונקציה לבדיקת רשימה שחורה
 function isBlacklisted(userId) {
     const id = normalizeId(userId);
-    log(`Checking blacklist for user: ${id}. Blacklist size: ${BLACKLIST.size}`, "BLACKLIST_CHECK");
-    return BLACKLIST.has(id);
+    const blacklist = botConfig.blacklistedUsers;
+    log(`Checking blacklist for user: ${id}. Blacklist size: ${blacklist.size}`, "BLACKLIST_CHECK");
+    return blacklist.has(id);
 }
 
 // הוספת פונקציה לשליחת הודעה לכל הקבוצות
@@ -1339,7 +1328,7 @@ client.on('message', async message => {
                     }
 
                     const userIdToUnblock = `${phoneDigits}@c.us`;
-                    if (!BLACKLIST.has(userIdToUnblock)) {
+                    if (!botConfig.blacklistedUsers.has(userIdToUnblock)) {
                         log(`User ${userIdToUnblock} is not in blacklist. Informing admin ${senderId}.`, adminActionStage);
                         await message.reply(`ℹ️ ${phoneDigits} אינו נמצא ברשימה השחורה.`);
                         userStates.delete(senderId);
@@ -1349,7 +1338,7 @@ client.on('message', async message => {
                     removeFromBlacklist(userIdToUnblock);
                     // Also attempt to remove potential LID variant from blacklist if your logic supports it
                     const lidVariant = `${phoneDigits}@lid`;
-                    if (BLACKLIST.has(lidVariant)) {
+                    if (botConfig.blacklistedUsers.has(lidVariant)) {
                         removeFromBlacklist(lidVariant);
                         log(`Also removed LID variant ${lidVariant} from blacklist.`, adminActionStage);
                     }
@@ -1906,7 +1895,7 @@ function saveBlacklist() {
     try {
         // Delegate saving to botConfig
         botConfig.saveBlacklistedUsers();
-        log(`✅ רשימה שחורה (${BLACKLIST.size} משתמשים) עודכנה בהצלחה דרך botConfig`, "DATA_SAVE_BLACKLIST");
+        log(`✅ רשימה שחורה (${botConfig.blacklistedUsers.size} משתמשים) עודכנה בהצלחה דרך botConfig`, "DATA_SAVE_BLACKLIST");
     } catch (error) {
         logError('❌ שגיאה בשמירת הרשימה השחורה דרך botConfig:', "DATA_SAVE_BLACKLIST_ERROR", error);
     }
@@ -1914,23 +1903,23 @@ function saveBlacklist() {
 
 function addToBlacklist(userId) {
     const id = normalizeId(userId);
-    log(`Attempting to add user ${id} to blacklist. Current size: ${BLACKLIST.size}`, "BLACKLIST_ADD");
+    log(`Attempting to add user ${id} to blacklist. Current size: ${botConfig.blacklistedUsers.size}`, "BLACKLIST_ADD");
     botConfig.addToBlacklist(id);
-    log(`User ${id} processed for blacklist addition. New size: ${BLACKLIST.size}. User is on blacklist: ${BLACKLIST.has(id)}`, "BLACKLIST_ADD");
+    log(`User ${id} processed for blacklist addition. New size: ${botConfig.blacklistedUsers.size}. User is on blacklist: ${botConfig.blacklistedUsers.has(id)}`, "BLACKLIST_ADD");
 }
 
 function removeFromBlacklist(userId) {
     const id = normalizeId(userId);
-    log(`Attempting to remove user ${id} from blacklist. Current size: ${BLACKLIST.size}`, "BLACKLIST_REMOVE");
+    log(`Attempting to remove user ${id} from blacklist. Current size: ${botConfig.blacklistedUsers.size}`, "BLACKLIST_REMOVE");
     botConfig.removeFromBlacklist(id);
-    log(`User ${id} processed for blacklist removal. New size: ${BLACKLIST.size}. User is on blacklist: ${BLACKLIST.has(id)}`, "BLACKLIST_REMOVE");
+    log(`User ${id} processed for blacklist removal. New size: ${botConfig.blacklistedUsers.size}. User is on blacklist: ${botConfig.blacklistedUsers.has(id)}`, "BLACKLIST_REMOVE");
 }
 
 // שמירה אוטומטית כל 5 דקות
 setInterval(() => {
     const stage = "AUTO_SAVE";
     log('🔄 מבצע שמירה אוטומטית של נתונים...', stage);
-    log(`מצב נוכחי לפני שמירה: רשימה שחורה: ${BLACKLIST.size} משתמשים, משתמשים מאושרים: ${APPROVED_USERS.size} משתמשים`, stage);
+    log(`מצב נוכחי לפני שמירה: רשימה שחורה: ${botConfig.blacklistedUsers.size} משתמשים, משתמשים מאושרים: ${APPROVED_USERS.size} משתמשים`, stage);
     saveBlacklist();
     saveApprovedUsers();
     log('🔄 שמירה אוטומטית הושלמה.', stage);
@@ -3038,16 +3027,10 @@ cron.schedule(
 );
 async function approveGroupRequests(groupId = null, options = {}, client) {
     try {
-        // Use the BLACKLIST variable which should be synced with botConfig.blacklistedUsers
-        // Ensure BLACKLIST is up-to-date if it's not a direct reference
         const stage = groupId ? `APPROVE_REQUESTS_SINGLE[${groupId}]` : "APPROVE_REQUESTS_ALL";
         log(`Starting approveGroupRequests. Group ID: ${groupId || 'ALL'}. Options: ${JSON.stringify(options)}`, stage);
 
-        let currentBlacklist = BLACKLIST;
-        if (!(currentBlacklist instanceof Set)) {
-            logError("BLACKLIST is not a Set in approveGroupRequests. Using botConfig.blacklistedUsers directly or falling back.", stage);
-            currentBlacklist = botConfig.blacklistedUsers || new Set();
-        }
+        const currentBlacklist = botConfig.blacklistedUsers;
         log(`Using blacklist with ${currentBlacklist.size} entries.`, stage);
 
         if (groupId) {
