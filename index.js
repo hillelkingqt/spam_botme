@@ -1656,11 +1656,13 @@ async function sendDashboardUpdate(data) {
 
 // הפעלת השרת
 const PORT = process.env.PORT || 3003;
-const startServer = (port) => {
+const startServer = async (port) => {
     const stage = "SERVER_STARTUP";
-    http.listen(port, () => {
-        log(`השרת פועל על פורט ${port}`, stage);
-    }).on('error', (error) => {
+    try {
+        http.listen(port, () => {
+            log(`השרת פועל על פורט ${port}`, stage);
+        });
+    } catch (error) {
         if (error.code === 'EADDRINUSE') {
             logError(`פורט ${port} תפוס, מנסה פורט ${port + 1}`, stage, error);
             startServer(port + 1);
@@ -1668,7 +1670,7 @@ const startServer = (port) => {
             logError(`שגיאה קריטית בהפעלת השרת: ${error.message}. יוצא מהתהליך.`, stage, error);
             process.exit(1);
         }
-    });
+    }
 };
 
 startServer(PORT);
