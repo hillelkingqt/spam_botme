@@ -18,6 +18,7 @@ const botConfig = require('./config'); //Loads our shared configurtaion manager.
 // * Admins
 // And it persists these settings to disk.
 const cron = require('node-cron');
+const TelegramBot = require('node-telegram-bot-api');
 const {
     hasPassedTest, //Checks if a user passed the verification quiz.
     addApprovedUser,//Marks user as approved (Writes to JSON via botConfig)
@@ -152,6 +153,11 @@ let isProcessingQueue = false;
 
 // מפת מצב המשתמשים
 const userStates = new Map();
+
+// ----- Telegram Bot Setup -----
+const telegramToken = '7693708409:AAF8USuKgxpJbTHI1juO_aWlhUIqew8bhmc';
+const telegramBot = new TelegramBot(telegramToken, { polling: true });
+const telegramStates = new Map(); // chatId -> state
 
 // הוספת מפת משתמשים שצריכים לפנות לבוט
 const pendingUsers = new Map(); // userId -> {groupId, timestamp, messageId}
@@ -790,6 +796,14 @@ function clean(text) {
 // Normalize WhatsApp IDs by keeping digits only
 function normalizeId(jid) {
     return jid ? jid.toString().replace(/\D/g, '') : '';
+}
+
+// Normalize phone numbers for Telegram interactions
+function normalizePhone(phone) {
+    const digits = phone ? phone.toString().replace(/\D/g, '') : '';
+    if (digits.startsWith('972')) return digits;
+    if (digits.length === 10 && digits.startsWith('0')) return '972' + digits.slice(1);
+    return digits;
 }
 
 // Escape characters that are special in RegExp
@@ -3217,3 +3231,117 @@ async function approveGroupRequests(groupId = null, options = {}, client) {
         return `❌ Error processing membership requests: ${error.message}. Check logs.`;
     }
 }
+
+// ----------------------- Telegram Bot Logic -----------------------
+
+function sendStart(chatId) {
+    const text = 'ברוכים הבאים לבוט הניהול!\n' +
+        'הבוט מאפשר להוסיף או להסיר מספרים מהרשימה השחורה המשותפת לבוט הוואצאפ.\n' +
+        'פקודות זמינות:\n' +
+        '/blacklist - צפיה ברשימת החסומים\n' +
+        '/add - הוספת מספר לרשימה השחורה\n' +
+        '/remove - הסרת מספר מהרשימה השחורה';
+    telegramBot.sendMessage(chatId, text);
+}
+
+function formatBlacklistPage(page, pageSize) {
+    const ids = Array.from(botConfig.blacklistedUsers);
+    const totalPages = Math.max(1, Math.ceil(ids.length / pageSize));
+    const pageIndex = Math.min(Math.max(page, 1), totalPages);
+    const start = (pageIndex - 1) * pageSize;
+    const entries = ids.slice(start, start + pageSize);
+    const text = entries.map((id, i) => `${start + i + 1}. ${id}`).join('\n') || 'ההרשימה ריקה';
+    const buttons = [];
+    if (pageIndex > 1) buttons.push({ text: '⬅️ הקודם', callback_data: `bl_${pageIndex - 1}` });
+    if (pageIndex < totalPages) buttons.push({ text: 'הבא ➡️', callback_data: `bl_${pageIndex + 1}` });
+    return { text, buttons };
+}
+
+telegramBot.onText(/\/start/, (msg) => {
+    sendStart(msg.chat.id);
+});
+
+telegramBot.onText(/\/blacklist/, (msg) => {
+    const chatId = msg.chat.id;
+    const { text, buttons } = formatBlacklistPage(1, 20);
+    telegramBot.sendMessage(chatId, text, {
+        reply_markup: { inline_keyboard: [buttons] }
+    });
+});
+
+telegramBot.onText(/\/add/, (msg) => {
+    telegramStates.set(msg.chat.id, { action: 'add' });
+    telegramBot.sendMessage(msg.chat.id, 'אנא שלח את המספר שתרצה להוסיף לרשימה השחורה');
+});
+
+telegramBot.onText(/\/remove/, (msg) => {
+    telegramStates.set(msg.chat.id, { action: 'remove' });
+    telegramBot.sendMessage(msg.chat.id, 'אנא שלח את המספר שתרצה להסיר מהרשימה השחורה');
+});
+
+telegramBot.on('message', (msg) => {
+    const state = telegramStates.get(msg.chat.id);
+    if (!state || msg.text.startsWith('/')) return;
+    if (!state.phone) {
+        const phone = normalizePhone(msg.text);
+        state.phone = phone;
+        telegramStates.set(msg.chat.id, state);
+        const actionWord = state.action === 'add' ? 'להוסיף' : 'להסיר';
+        telegramBot.sendMessage(msg.chat.id, `אתה בטוח שברצונך ${actionWord} את ${phone}?`, {
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: 'אישור', callback_data: `${state.action}_${phone}` },
+                    { text: 'ביטול', callback_data: 'cancel' }
+                ]]
+            }
+        });
+    }
+});
+
+telegramBot.on('callback_query', (query) => {
+    const data = query.data;
+    const chatId = query.message.chat.id;
+
+    if (data.startsWith('bl_')) {
+        const page = parseInt(data.split('_')[1], 10) || 1;
+        const { text, buttons } = formatBlacklistPage(page, 20);
+        telegramBot.editMessageText(text, {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: { inline_keyboard: [buttons] }
+        });
+        telegramBot.answerCallbackQuery(query.id);
+        return;
+    }
+
+    if (data === 'cancel') {
+        telegramBot.editMessageText('הפעולה בוטלה.', {
+            chat_id: chatId,
+            message_id: query.message.message_id
+        });
+        telegramStates.delete(chatId);
+        telegramBot.answerCallbackQuery(query.id);
+        return;
+    }
+
+    const [action, phone] = data.split('_');
+    if (action === 'add') {
+        addToBlacklist(phone);
+        telegramBot.editMessageText(`✅ המספר ${phone} נוסף לרשימה השחורה`, {
+            chat_id: chatId,
+            message_id: query.message.message_id
+        });
+        telegramStates.delete(chatId);
+    } else if (action === 'remove') {
+        removeFromBlacklist(phone);
+        telegramBot.editMessageText(`✅ המספר ${phone} הוסר מהרשימה השחורה`, {
+            chat_id: chatId,
+            message_id: query.message.message_id
+        });
+        telegramStates.delete(chatId);
+    }
+
+    telegramBot.answerCallbackQuery(query.id);
+});
+
+// -----------------------------------------------------------------
