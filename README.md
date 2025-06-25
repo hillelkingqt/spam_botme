@@ -5,9 +5,6 @@ This project contains a WhatsApp bot and now also includes a Telegram bot.
 Running `node index.js` will start both bots. The Telegram bot helps manage the
 `blacklist.json` file that is shared with the WhatsApp bot.
 
-Whenever numbers are added or removed from the blacklist through the Telegram
-bot the WhatsApp bot is automatically restarted so it reloads the updated list.
-
 ### Telegram Commands
 
 - `/start` – display information and available commands.

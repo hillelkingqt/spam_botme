@@ -401,19 +401,6 @@ client.on('ready', async () => {
 client.on('auth_failure', msg => {
     logError(`❌ בעיית אימות: ${msg}`, 'AUTHENTICATION_FAILURE');
 });
-
-// פונקציה לאתחול מחדש של לקוח הוואצאפ
-async function restartWhatsAppClient() {
-    const stage = 'RESTART';
-    try {
-        log('Restarting WhatsApp client...', stage);
-        await client.destroy();
-        await client.initialize();
-        log('WhatsApp client restarted', stage);
-    } catch (error) {
-        logError(`Failed to restart WhatsApp client: ${error.message}`, stage, error);
-    }
-}
 /*
 async function isGroupAdmin(client, groupId) {
     try {
@@ -3344,7 +3331,6 @@ telegramBot.on('callback_query', (query) => {
             chat_id: chatId,
             message_id: query.message.message_id
         });
-        restartWhatsAppClient();
         telegramStates.delete(chatId);
     } else if (action === 'remove') {
         removeFromBlacklist(phone);
@@ -3352,7 +3338,6 @@ telegramBot.on('callback_query', (query) => {
             chat_id: chatId,
             message_id: query.message.message_id
         });
-        restartWhatsAppClient();
         telegramStates.delete(chatId);
     }
 
