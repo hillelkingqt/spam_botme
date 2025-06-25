@@ -18,7 +18,6 @@ const botConfig = require('./config'); //Loads our shared configurtaion manager.
 // * Admins
 // And it persists these settings to disk.
 const cron = require('node-cron');
-const startTelegramBot = require('./telegram-bot');
 const {
     hasPassedTest, //Checks if a user passed the verification quiz.
     addApprovedUser,//Marks user as approved (Writes to JSON via botConfig)
@@ -1674,9 +1673,6 @@ const startServer = async (port) => {
 };
 
 startServer(PORT);
-
-// הפעלת בוט הטלגרם במקביל לבוט הוואטסאפ
-startTelegramBot();
 
 // התחלת הבוט
 initializeClient();
