@@ -229,11 +229,46 @@ class BotConfig {
         return this.saveBlacklistedUsers();
     }
 
-    removeFromBlacklist(userId) {
-        const id = normalizeId(userId);
-        this.blacklistedUsers.delete(id);
-        return this.saveBlacklistedUsers();
+removeFromBlacklist(userId) {
+    const stage = "BLACKLIST_REMOVE_SMART";
+    const normalizedId = normalizeId(userId); // '972501234567'
+    if (!normalizedId) {
+        console.error('ניסיון להסיר ID לא תקין מהרשימה השחורה:', userId);
+        return false;
     }
+
+    const cUsId = `${normalizedId}@c.us`; // '972501234567@c.us'
+    const lidId = `${normalizedId}@lid`; // '972501234567@lid'
+
+    let removedSomething = false;
+
+    // הסרה של ה-ID המנורמל (ללא סיומת)
+    if (this.blacklistedUsers.has(normalizedId)) {
+        this.blacklistedUsers.delete(normalizedId);
+        console.log(`[${stage}] הוסר ID מנורמל: ${normalizedId}`);
+        removedSomething = true;
+    }
+    // הסרה של גרסת c.us
+    if (this.blacklistedUsers.has(cUsId)) {
+        this.blacklistedUsers.delete(cUsId);
+        console.log(`[${stage}] הוסרה גרסת c.us: ${cUsId}`);
+        removedSomething = true;
+    }
+    // הסרה של גרסת lid
+    if (this.blacklistedUsers.has(lidId)) {
+        this.blacklistedUsers.delete(lidId);
+        console.log(`[${stage}] הוסרה גרסת lid: ${lidId}`);
+        removedSomething = true;
+    }
+
+    if (removedSomething) {
+        console.log(`[${stage}] מבצע שמירה לקובץ לאחר הסרת וריאציות של ${normalizedId}`);
+        return this.saveBlacklistedUsers();
+    } else {
+        console.log(`[${stage}] המספר ${normalizedId} (ווריאציות שלו) לא נמצא ברשימה השחורה.`);
+        return true; // הפעולה "הצליחה" כי המצב הרצוי הושג
+    }
+}
 
     isBlacklisted(userId) {
         const id = normalizeId(userId);
