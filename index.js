@@ -384,6 +384,17 @@ client.on('ready', async () => {
         await checkOldMessages(client);
         log('סיים בדיקת הודעות ישנות תקופתית', 'MAINTENANCE_OLD_MESSAGES');
     }, 60 * 60 * 1000);
+
+    // Automatic handling of pending join requests every minute
+    setInterval(async () => {
+        const stage = 'AUTO_APPROVE_REQUESTS';
+        try {
+            const result = await approveGroupRequests(null, {}, client);
+            log(`Auto approve cycle result: ${result}`, stage);
+        } catch (autoErr) {
+            logError('Error during automatic join request processing:', stage, autoErr);
+        }
+    }, 60 * 1000);
 });
 
 client.on('auth_failure', msg => {
@@ -3085,6 +3096,16 @@ async function approveGroupRequests(groupId = null, options = {}, client) {
 
             log(`Total allowed: ${allowedRequesterIds.length}, Total blocked: ${blockedRequesters.length} for group ${groupId}.`, stage);
 
+            // Reject blacklisted requesters before approving the others
+            if (blockedRequesters.length > 0) {
+                try {
+                    await client.rejectGroupMembershipRequests(groupId, { requesterIds: blockedRequesters, ...options });
+                    log(`Rejected ${blockedRequesters.length} blacklisted requests in group ${groupId}.`, `${stage}_REJECT`);
+                } catch (rejectErr) {
+                    logError(`Error rejecting blacklisted requests for group ${groupId}:`, `${stage}_REJECT_ERROR`, rejectErr);
+                }
+            }
+
             if (allowedRequesterIds.length === 0) {
                 const msg = `⚠️ No valid (non-blacklisted) requests to approve for group ${groupId}. Blacklisted: ${blockedRequesters.length}, Failed to process/extract ID: ${membershipRequests.length - allowedRequesterIds.length - blockedRequesters.length}`;
                 log(msg, stage);
@@ -3166,6 +3187,14 @@ async function approveGroupRequests(groupId = null, options = {}, client) {
                                     } else {
                                         blockedInThisGroup.push(reqId);
                                     }
+                                }
+                            }
+                            if (blockedInThisGroup.length > 0) {
+                                try {
+                                    await client.rejectGroupMembershipRequests(group.id._serialized, { requesterIds: blockedInThisGroup, ...options });
+                                    log(`Rejected ${blockedInThisGroup.length} blacklisted requests in ${group.name}.`, `${singleGroupStage}_REJECT`);
+                                } catch (rejectErrAll) {
+                                    logError(`Error rejecting requests for ${group.name}: ${rejectErrAll.message}`, `${singleGroupStage}_REJECT_ERROR`, rejectErrAll);
                                 }
                             }
                             totalBlockedCount += blockedInThisGroup.length;

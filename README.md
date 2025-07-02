@@ -14,3 +14,7 @@ Running `node index.js` will start both bots. The Telegram bot helps manage the
 
 Numbers can be sent in local or international format (e.g. `0501234567` or
 `972501234567`).
+
+The WhatsApp bot periodically checks pending join requests in all managed
+groups. Requests from numbers found in `blacklist.json` are rejected while all
+others are approved automatically.
