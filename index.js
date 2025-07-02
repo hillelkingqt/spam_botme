@@ -951,8 +951,12 @@ client.on('message', async message => {
                 log(`Deleted message from ${realJidForAction} due to forbidden word.`, `${stagePrefix}_FORBIDDEN_WORD`);
 
                 const participantToRemove = realJidForAction || senderId;
-                await chat.removeParticipants([participantToRemove]);
-                log(`Removed user ${participantToRemove} from group due to forbidden word.`, `${stagePrefix}_FORBIDDEN_WORD`);
+                const removedOk = await kickUserFromGroup(client, participantToRemove, chat.id._serialized);
+                if (removedOk) {
+                    log(`Removed user ${participantToRemove} from group due to forbidden word.`, `${stagePrefix}_FORBIDDEN_WORD`);
+                } else {
+                    logError(`Failed to remove ${participantToRemove} from group ${chat.name || chat.id._serialized} after forbidden word.`, `${stagePrefix}_FORBIDDEN_WORD_ERROR`);
+                }
 
                 await alertRemoval(client, `מילה אסורה: "${matchedForbiddenWord}"`, message, chat.name || chat.id._serialized);
 
