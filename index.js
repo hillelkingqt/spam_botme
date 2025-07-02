@@ -3151,8 +3151,20 @@ async function approveGroupRequests(groupId = null, options = {}, client) {
         } else {
             // Logic for ALL groups
             log("Processing requests for ALL managed groups.", stage);
-            const chats = await client.getChats();
-            const groupsToProcess = chats.filter(chat => chat.isGroup && botConfig.isManagedGroup(chat.id._serialized));
+            const managedGroupIds = Array.from(botConfig.managedGroups);
+            const groupsToProcess = [];
+            for (const gid of managedGroupIds) {
+                try {
+                    const chat = await client.getChatById(gid);
+                    if (chat && chat.isGroup) {
+                        groupsToProcess.push(chat);
+                    } else {
+                        log(`Group id ${gid} not found or not a group`, `${stage}_FETCH_GROUP`);
+                    }
+                } catch (fetchErr) {
+                    logError(`Failed to fetch chat ${gid}`, `${stage}_FETCH_GROUP_ERROR`, fetchErr);
+                }
+            }
             log(`Found ${groupsToProcess.length} managed groups to iterate for approvals.`, stage);
 
             let totalApprovedCount = 0;
