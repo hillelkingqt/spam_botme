@@ -174,7 +174,7 @@ async function startTest(client, userId, groupId, reason = '', message = null, g
             testMessage += 'שלחת הודעה עם קישור. ';
         }
         testMessage += 'עליך לענות נכון על 3 שאלות כדי להישאר בקבוצה.\n';
-        testMessage += 'יש לך 5 דקות לסיים את המבחן.\n\n';
+        testMessage += 'יש לך 30 דקות לסיים את המבחן.\n\n';
         testMessage += `שאלה 1/3:\n${firstQuestion.question}`;
         await client.sendMessage(userId, testMessage);
         const testData = {
@@ -194,7 +194,7 @@ async function startTest(client, userId, groupId, reason = '', message = null, g
                 } catch (error) {
                     console.error('Error handling test timeout:', error);
                 }
-            }, 10 * 60 * 1000)
+            }, 30 * 60 * 1000)
         };
         activeTests.set(userId, testData);
         console.log(`Started test for user ${userId}`);
