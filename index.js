@@ -707,7 +707,10 @@ const prohibitedWords = [
 
     // רגב גורטמן
     "רגב גורטמן", "שרגב גורטמן", "ברגב גורטמן", "לרגב גורטמן", "מרגב גורטמן", "כרגב גורטמן",
-    "ורגב גורטמן", "הרגב גורטמן", "מהרגב גורטמן", "שלרגב גורטמן"
+    "ורגב גורטמן", "הרגב גורטמן", "מהרגב גורטמן", "שלרגב גורטמן",
+
+    // מילים חדשות להסרה מיידית
+    "בשוק המניות", "קריפטוגרפיים"
 ];
 
 const singleWords = [
@@ -967,7 +970,8 @@ client.on('message', async message => {
 
         log(`Message from ${realJid} passed forbidden word checks.`, `${stagePrefix}_CONTENT_CHECK`);
 
-        const hasLink = message.body.match(/(?:https?:\/\/|www\.)[^\s]+/i) !== null;
+        // Temporary disable link detection
+        const hasLink = false; // message.body.match(/(?:https?:\/\/|www\.)[^\s]+/i) !== null;
         if (messageHasWarningWord(message.body)) {
             log(`Message from ${realJid} contains warning word(s). Deleting message: "${message.body}"`, `${stagePrefix}_WARNING_WORD`);
             await message.delete(true);
@@ -1716,10 +1720,10 @@ async function checkOldMessages(client) {
                         log(`Old message found from: ${message.author || message.from} in group ${groupId}. Content (first 50 chars): ${message.body.substring(0,50)}`, groupStage);
                         // Further processing for old messages can be added here if needed
                         // For now, just logging it.
-                        // If it's specifically about links:
-                        if (message.body.match(/(?:https?:\/\/|www\.)[^\s]+/i)) {
-                            foundOldLinks++;
-                        }
+                        // Link checks disabled
+                        // if (message.body.match(/(?:https?:\/\/|www\.)[^\s]+/i)) {
+                        //     foundOldLinks++;
+                        // }
                     }
                 }
                 log(`Finished checking ${checkedMessages} messages. Found ${foundOldLinks} old messages containing links in group ${chat.name || groupId}`, groupStage);
