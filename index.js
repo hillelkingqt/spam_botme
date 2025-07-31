@@ -155,7 +155,8 @@ let isProcessingQueue = false;
 const userStates = new Map();
 
 // ----- Telegram Bot Setup -----
-const telegramToken = '7693708409:AAF8USuKgxpJbTHI1juO_aWlhUIqew8bhmc';
+// Token for the Telegram bot
+const telegramToken = '7693708409:AAH99w-r2DtxeoiTT3wa79FVZs0fPKwhm-0';
 const telegramBot = new TelegramBot(telegramToken, { polling: true });
 const telegramStates = new Map(); // chatId -> state
 
