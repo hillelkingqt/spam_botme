@@ -37,7 +37,8 @@ const suspiciousKeywords = [
     'מבצע', 'הנחה', 'חינם', 'הזדמנות', 'מהיר', 'רווחים',
     // מילים באנגלית
     'investment', 'profit', 'income', 'work from home', 'part time',
-    'promotion', 'offer', 'discount', 'free', 'limited time'
+    'promotion', 'offer', 'discount', 'free', 'limited time',
+    'בשוק המניות', 'קריפטוגרפיים'
 ];
 
 // הוספת שאלות ויזואליות עם אימוג'ים
